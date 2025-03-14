@@ -13,3 +13,4 @@ polars==1.22.0
 composio-langchain==0.7.4
 langchain-groq==0.2.5
 tavily-python==0.5.1
+langgraph-checkpoint-sqlite==2.0.6
