@@ -1,2 +1,5 @@
 .env
 .composio.lock
+
+__pycache__
+sample.py
