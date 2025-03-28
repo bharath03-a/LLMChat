@@ -15,7 +15,9 @@ langchain-groq==0.2.5
 tavily-python==0.5.1
 langgraph-checkpoint-sqlite==2.0.6
 weaviate-client==4.11.3
-python-magic==0.4.27
+python-magic
 pypdf==5.4.0
 pytesseract==0.3.13
 pillow==11.1.0
+matplotlib==3.10.1
+networkx==3.4.2

@@ -15,6 +15,9 @@ from langchain_core.tools import Tool
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, List, Optional
 
+import networkx as nx
+import matplotlib.pyplot as plt
+
 # Load environment variables
 load_dotenv()
 
@@ -39,7 +42,7 @@ class LegalAIAssistant:
         )
         
         # Initialize Tavily Client for web search
-        self.tavily_client = TavilyClient(api_key=os.getenv("TRAVILY_API_KEY"))
+        self.tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
         
         # Query Understanding Prompt
         self.query_understanding_prompt = ChatPromptTemplate.from_messages([
@@ -150,6 +153,51 @@ class LegalAIAssistant:
                 result['url'] for result in state.get('web_search_results', [])
             ]
         }
+    
+    def visualize_workflow(self):
+        """Visualize the LangGraph workflow"""
+        # Recreate the workflow for visualization
+        workflow = StateGraph(AgentState)
+        
+        # Add nodes with labels
+        workflow.add_node("Query Understanding", self.understand_query_node)
+        workflow.add_node("Document Search", self.document_search_node)
+        workflow.add_node("Web Search", self.web_search_node)
+        workflow.add_node("Generate Response", self.generate_final_response_node)
+        
+        # Create a NetworkX graph
+        nx_graph = nx.DiGraph()
+        
+        # Add nodes
+        nx_graph.add_nodes_from([
+            "Query Understanding", 
+            "Document Search", 
+            "Web Search", 
+            "Generate Response"
+        ])
+        
+        # Add edges
+        nx_graph.add_edges_from([
+            ("Query Understanding", "Document Search"),
+            ("Document Search", "Web Search"),
+            ("Web Search", "Generate Response")
+        ])
+        
+        # Visualization
+        plt.figure(figsize=(10, 6))
+        pos = nx.spring_layout(nx_graph, seed=42)
+        nx.draw(nx_graph, pos, 
+                with_labels=True, 
+                node_color='skyblue', 
+                node_size=3000, 
+                font_size=10, 
+                font_weight='bold', 
+                arrows=True, 
+                edge_color='gray')
+        
+        plt.title("Legal AI Assistant Workflow")
+        plt.tight_layout()
+        plt.show()
 
     def build_workflow(self):
         """Construct the agentic workflow using LangGraph"""
@@ -181,6 +229,11 @@ class LegalAIAssistant:
 # Example usage
 async def main():
     assistant = LegalAIAssistant()
+    
+    # Visualize the workflow
+    assistant.visualize_workflow()
+    
+    # Process a query
     result = await assistant.process_query("How do I deal with a noise complaint against my neighbor?")
     print("Final Response:", result['final_response'])
     print("\nReferences:", result['references'])
