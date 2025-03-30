@@ -1,18 +1,16 @@
 import os
-from typing import List, Dict, Any
-from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_weaviate.vectorstores import WeaviateVectorStore
-from langchain_groq import ChatGroq
-from langchain_core.embeddings import Embeddings
-from langchain_huggingface import HuggingFaceEmbeddings
 import dotenv
+from typing import List, Any
 
 import weaviate
 from weaviate.classes.init import Auth
 import weaviate.classes.config as wvc
 from weaviate.classes.config import Configure
-from weaviate.embedded import EmbeddedOptions
+
+from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_weaviate.vectorstores import WeaviateVectorStore
+from langchain_huggingface import HuggingFaceEmbeddings
 
 dotenv.load_dotenv()
 
