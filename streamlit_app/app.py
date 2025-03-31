@@ -56,6 +56,7 @@ app.add_middleware(
 
 class TextQueryRequest(BaseModel):
     query: str
+    conversation_history: Optional[List[Dict[str, Any]]] = None
 
 class QueryResponse(BaseModel):
     task_id: str
@@ -79,7 +80,9 @@ async def text_query(background_tasks: BackgroundTasks, request: TextQueryReques
         process_query_async,
         task_id,
         request.query,
-        "text"
+        "text",
+        None,
+        request.conversation_history
     )
     
     return QueryResponse(task_id=task_id, status="processing")
@@ -88,7 +91,8 @@ async def text_query(background_tasks: BackgroundTasks, request: TextQueryReques
 async def image_query(
     background_tasks: BackgroundTasks, 
     image: UploadFile = File(...), 
-    query: str = Form(None)
+    query: str = Form(None),
+    conversation_history: str = Form(None)
 ):
     """Process an image-based legal query (e.g., a document photo)"""
     if not legal_assistant:
@@ -107,13 +111,23 @@ async def image_query(
     # Store the initial task status
     active_tasks[task_id] = {"status": "processing", "response": None}
     
+    # Parse conversation history if provided
+    history = None
+    if conversation_history:
+        try:
+            import json
+            history = json.loads(conversation_history)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid conversation history format: {str(e)}")
+    
     # Process the query asynchronously
     background_tasks.add_task(
         process_query_async,
         task_id,
         img,
         "image",
-        query
+        query,
+        history
     )
     
     return QueryResponse(task_id=task_id, status="processing")
@@ -122,7 +136,8 @@ async def image_query(
 async def pdf_query(
     background_tasks: BackgroundTasks, 
     pdf: UploadFile = File(...), 
-    query: str = Form(None)
+    query: str = Form(None),
+    conversation_history: str = Form(None)
 ):
     """Process a PDF-based legal query"""
     if not legal_assistant:
@@ -139,13 +154,23 @@ async def pdf_query(
     # Store the initial task status
     active_tasks[task_id] = {"status": "processing", "response": None}
     
+    # Parse conversation history if provided
+    history = None
+    if conversation_history:
+        try:
+            import json
+            history = json.loads(conversation_history)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid conversation history format: {str(e)}")
+    
     # Process the query asynchronously
     background_tasks.add_task(
         process_query_async,
         task_id,
         contents,
         "pdf",
-        query
+        query,
+        history
     )
     
     return QueryResponse(task_id=task_id, status="processing")
@@ -163,22 +188,25 @@ async def query_status(task_id: str):
         response=task_info.get("response")
     )
 
-async def process_query_async(task_id: str, query_data: Any, input_type: str, text_query: str = None):
+async def process_query_async(task_id: str, query_data: Any, input_type: str, text_query: str = None, conversation_history: List[Dict[str, Any]] = None):
     """Process a query asynchronously and update the task status"""
     try:
         # If there's both input data and a text query, we need to handle differently
         if text_query and input_type in ["image", "pdf"]:
-            # Process the input data first
-            processed_input = legal_assistant.input_handler.process_input(query_data, input_type)
-            
-            # Combine with the text query
-            combined_query = f"{text_query}\n\nExtracted content from {input_type}:\n{processed_input['content']}"
-            
-            # Process as text
-            result = await legal_assistant.process_query(combined_query, "text")
+            # Process the query with combined input
+            result = await legal_assistant.process_query(
+                query_data, 
+                input_type, 
+                text_query=text_query,
+                conversation_history=conversation_history
+            )
         else:
             # Process normally
-            result = await legal_assistant.process_query(query_data, input_type)
+            result = await legal_assistant.process_query(
+                query_data, 
+                input_type,
+                conversation_history=conversation_history
+            )
         
         # Update task status
         active_tasks[task_id] = {
@@ -186,7 +214,8 @@ async def process_query_async(task_id: str, query_data: Any, input_type: str, te
             "response": {
                 "final_response": result.get("final_response", ""),
                 "references": result.get("references", []),
-                "query_details": result.get("query_details", {})
+                "query_details": result.get("query_details", {}),
+                "conversation_history": result.get("conversation_history", [])
             }
         }
     except Exception as e:
