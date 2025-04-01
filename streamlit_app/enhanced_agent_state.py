@@ -3,18 +3,18 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 class EnhancedAgentState(TypedDict):
     """Enhanced state management for the Legal AI Assistant"""
-    input: Any  # Raw input (text, image, PDF)
-    input_type: str  # Type of input (text, image, PDF)
-    processed_input: Optional[Dict[str, Any]]  # Processed input data
-    query_details: Optional[Dict[str, Any]]  # Decomposed query
-    document_search_results: Optional[List[Dict[str, Any]]]  # Results from document search
-    document_search_sufficient: Optional[bool]  # Whether document search results are sufficient
-    web_search_results: Optional[List[Dict[str, Any]]]  # Results from web search
-    web_search_sufficient: Optional[bool]  # Whether web search results are sufficient
-    need_additional_search: Optional[bool]  # Whether additional search is needed
-    final_response: Optional[str]  # Final response content
-    references: Optional[List[str]]  # References
-    conversation_history: List[Union[HumanMessage, AIMessage]]  # Conversation history
+    input: Any
+    input_type: str
+    processed_input: Optional[Dict[str, Any]]
+    query_details: Optional[Dict[str, Any]]
+    document_search_results: Optional[List[Dict[str, Any]]]
+    document_search_sufficient: Optional[bool]
+    web_search_results: Optional[List[Dict[str, Any]]]
+    web_search_sufficient: Optional[bool]
+    need_additional_search: Optional[bool]
+    final_response: Optional[str]
+    references: Optional[List[str]]
+    conversation_history: List[Union[HumanMessage, AIMessage]]
 
 def determine_search_sufficiency(state: EnhancedAgentState, search_type: str, threshold: float = 7.0) -> Dict[str, Any]:
     """Determine if search results are sufficient based on relevance score"""

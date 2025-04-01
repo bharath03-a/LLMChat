@@ -27,7 +27,7 @@ active_tasks = {}
 async def lifespan(app: FastAPI):
     # Startup logic
     global legal_assistant
-    legal_assistant = LegalAIAssistant(os.getenv("WEAVIATE_URL"))
+    legal_assistant = LegalAIAssistant()
     print("Legal AI Assistant initialized")
     
     # Start task cleanup

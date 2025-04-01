@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import warnings
 from dotenv import load_dotenv
 import asyncio
@@ -29,25 +30,20 @@ from multimodal_handler import MultimodalInputHandler
 from enhanced_agent_state import EnhancedAgentState, determine_search_sufficiency
 
 class LegalAIAssistant:
-    def __init__(self, weaviate_url: Optional[str] = None):
-        # Initialize LLM
+    def __init__(self):
         self.llm = ChatGroq(
             model="llama3-70b-8192",
             temperature=0.6,
             api_key=os.getenv("GROQ_API_KEY")
         )
         
-        # Initialize Tavily Client for web search
         self.tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
-        
-        # Initialize document processor and vector store
-        self.document_processor = DocumentProcessor(documents_dir="/Users/bharathvelamala/Documents/LLM/LLMChat/streamlit_app/notes/")
-        self.vector_store = self.document_processor.create_vector_store(weaviate_url)
-        
-        # Initialize multimodal input handler
+    
+        self.document_processor = DocumentProcessor(documents_dir="../streamlit_app/notes/")
+        self.vector_store = self.document_processor.create_vector_store()
+
         self.input_handler = MultimodalInputHandler()
         
-        # Define system prompts
         self.query_understanding_system = """You are an expert legal AI assistant specializing in understanding complex legal queries.
         Your task is to analyze the user's input and break it down into components that will guide a comprehensive legal search and response.
         Pay special attention to:
@@ -96,8 +92,6 @@ class LegalAIAssistant:
         
         # Initialize prompts
         self._initialize_prompts()
-
-        self.visualize_workflow("./img/workflow.png")
     
     def _initialize_prompts(self):
         """Initialize all prompts used by the assistant"""
@@ -106,16 +100,19 @@ class LegalAIAssistant:
             ("system", self.query_understanding_system),
             ("human", """Analyze the following legal query and break it down into its key components:
 
-{processed_input}
+            {processed_input}
 
-Return a structured JSON with these fields:
-- core_legal_issue: The main legal question or problem
-- jurisdiction: Relevant legal jurisdiction(s) if specified or can be inferred
-- legal_domains: List of relevant legal areas (e.g., criminal, civil, property)
-- subqueries: List of related questions that might need separate investigation
-- time_sensitivity: Any urgent aspects of the query
-- key_terms: Important legal terms mentioned or implied in the query
-""")
+            Return a structured JSON with these fields:
+            - core_legal_issue: The main legal question or problem
+            - jurisdiction: Relevant legal jurisdiction(s) if specified or can be inferred
+            - legal_domains: List of relevant legal areas (e.g., criminal, civil, property)
+            - subqueries: List of related questions that might need separate investigation
+            - time_sensitivity: Any urgent aspects of the query
+            - key_terms: Important legal terms mentioned or implied in the query
+             
+            1. **First, output JSON only** without any inline comments.
+            2. **After the JSON, provide explanations** in natural language.
+            """)
         ])
         
         # Document Search Evaluation Prompt
@@ -123,17 +120,17 @@ Return a structured JSON with these fields:
             ("system", self.document_evaluation_system),
             ("human", """Evaluate these document search results for the legal query:
 
-Query Details: {query_details}
+            Query Details: {query_details}
 
-Document Search Results:
-{document_search_results}
+            Document Search Results:
+            {document_search_results}
 
-Provide a JSON response with these fields:
-- Relevance Score: (0-10)
-- Key Matching Sections: List of sections most relevant to the query
-- Information Gaps: Legal aspects of the query not covered by these documents
-- Confidence Assessment: Your confidence in the documents answering the query correctly
-""")
+            Provide a JSON response with these fields:
+            - Relevance Score: (0-10)
+            - Key Matching Sections: List of sections most relevant to the query
+            - Information Gaps: Legal aspects of the query not covered by these documents
+            - Confidence Assessment: Your confidence in the documents answering the query correctly
+            """)
         ])
         
         # Web Search Evaluation Prompt
@@ -141,18 +138,18 @@ Provide a JSON response with these fields:
             ("system", self.web_evaluation_system),
             ("human", """Evaluate these web search results for the legal query:
 
-Query Details: {query_details}
+            Query Details: {query_details}
 
-Web Search Results:
-{web_search_results}
+            Web Search Results:
+            {web_search_results}
 
-Provide a JSON response with these fields:
-- Relevance Score: (0-10)
-- Key Insights: Main legal information found in the results
-- Source Credibility: Assessment of the credibility of the sources
-- Information Gaps: Aspects of the query not adequately addressed
-- Comparison to Document Results: How these results complement the document search
-""")
+            Provide a JSON response with these fields:
+            - Relevance Score: (0-10)
+            - Key Insights: Main legal information found in the results
+            - Source Credibility: Assessment of the credibility of the sources
+            - Information Gaps: Aspects of the query not adequately addressed
+            - Comparison to Document Results: How these results complement the document search
+            """)
         ])
         
         # Final Response Generation Prompt
@@ -160,20 +157,20 @@ Provide a JSON response with these fields:
             ("system", self.final_response_system),
             ("human", """Generate a comprehensive legal response based on the following:
 
-Original Query: {processed_input}
-Query Analysis: {query_details}
-Document Search Results: {document_search_results}
-Web Search Results: {web_search_results}
+            Original Query: {processed_input}
+            Query Analysis: {query_details}
+            Document Search Results: {document_search_results}
+            Web Search Results: {web_search_results}
 
-Your response should include:
-1. A clear explanation of the legal concepts and principles
-2. Applicable laws, regulations, or precedents
-3. Practical guidance on how to proceed
-4. Any necessary disclaimers about jurisdictional limitations
-5. References to sources used
+            Your response should include:
+            1. A clear explanation of the legal concepts and principles
+            2. Applicable laws, regulations, or precedents
+            3. Practical guidance on how to proceed
+            4. Any necessary disclaimers about jurisdictional limitations
+            5. References to sources used
 
-Remember to remain balanced, factual, and helpful while acknowledging legal complexities.
-""")
+            Remember to remain balanced, factual, and helpful while acknowledging legal complexities.
+            """)
         ])
     
     def process_input_node(self, state: EnhancedAgentState) -> Dict[str, Any]:
@@ -182,39 +179,47 @@ Remember to remain balanced, factual, and helpful while acknowledging legal comp
             state['input'], 
             state['input_type']
         )
+
+        if 'conversation_history' not in state:
+            state['conversation_history'] = []
         
         return {"processed_input": processed_input}
     
     def understand_query_node(self, state: EnhancedAgentState) -> Dict[str, Any]:
         """Node for understanding the query"""
         chain = self.query_understanding_prompt | self.llm | JsonOutputParser()
-        query_details = chain.invoke({"processed_input": state['processed_input']['content']})
-        
-        # Add the query to conversation history
-        conversation_history = state.get('conversation_history', [])
-        conversation_history.append(HumanMessage(content=state['processed_input']['content']))
+
+        human_message = HumanMessage(
+            content=state['processed_input']['content'],
+            additional_kwargs={"timestamp": time.time()}
+        )
+        state['conversation_history'].append(human_message)
+        max_history_size = 10 
+        if len(state['conversation_history']) > max_history_size:
+            state['conversation_history'] = state['conversation_history'][-max_history_size:]
+
+        recent_context = state['conversation_history'][-3:]
+
+        context_enhanced_query = state['processed_input']['content']
+        query_details = chain.invoke({"processed_input": context_enhanced_query})
         
         return {
             "query_details": query_details,
-            "conversation_history": conversation_history
+            "conversation_history": state['conversation_history']
         }
 
     def document_search_node(self, state: EnhancedAgentState) -> Dict[str, Any]:
         """Node for searching legal documents"""
-        # Extract key terms from query details
         key_terms = state['query_details'].get('key_terms', [])
         core_issue = state['query_details'].get('core_legal_issue', '')
         
-        # Combine terms for search
         search_query = f"{core_issue} {' '.join(key_terms)}"
-        
-        # Use vector store to search documents
+
         search_results = self.vector_store.similarity_search_with_score(
             query=search_query,
             k=5,
         )
-        
-        # Format results for the LLM
+
         document_search_results = [
             {
                 "source": result[0].metadata.get('source', 'Unknown'),
@@ -224,8 +229,7 @@ Remember to remain balanced, factual, and helpful while acknowledging legal comp
             }
             for result in search_results
         ]
-        
-        # Evaluate search results
+
         chain = self.document_evaluation_prompt | self.llm | JsonOutputParser()
         document_evaluation = chain.invoke({
             "query_details": state['query_details'],
@@ -243,11 +247,9 @@ Remember to remain balanced, factual, and helpful while acknowledging legal comp
 
     def web_search_node(self, state: EnhancedAgentState) -> Dict[str, Any]:
         """Node for web searching"""
-        # Use the core legal issue and key terms for search
         core_issue = state['query_details'].get('core_legal_issue', '')
         jurisdiction = state['query_details'].get('jurisdiction', '')
         
-        # Construct a more specific query for web search
         web_query = f"{core_issue} legal {jurisdiction}"
         
         web_search_results = self.tavily_client.search(
@@ -256,7 +258,6 @@ Remember to remain balanced, factual, and helpful while acknowledging legal comp
             search_depth="advanced"
         )
         
-        # Evaluate web search results
         chain = self.web_evaluation_prompt | self.llm | JsonOutputParser()
         web_search_evaluation = chain.invoke({
             "query_details": state['query_details'],
@@ -274,53 +275,54 @@ Remember to remain balanced, factual, and helpful while acknowledging legal comp
 
     def generate_final_response_node(self, state: EnhancedAgentState) -> Dict[str, Any]:
         """Node for generating final comprehensive response"""
+        recent_conversation = state['conversation_history'][-5:]
+
         chain = self.final_response_prompt | self.llm
         final_response = chain.invoke({
             "processed_input": state['processed_input']['content'],
             "query_details": state['query_details'],
             "document_search_results": state['document_search_results'],
-            "web_search_results": state['web_search_results']
+            "web_search_results": state['web_search_results'],
+            "recent_conversation": recent_conversation
         })
+
+        ai_message = AIMessage(
+            content=final_response.content,
+            additional_kwargs={"timestamp": time.time()}
+        )
+        state['conversation_history'].append(ai_message)
         
-        # Collect references
         references = []
         
-        # Add document references
         for doc in state.get('document_search_results', []):
             source = doc.get('source', '')
             page = doc.get('page', '')
             if source and source not in references:
                 references.append(f"{source} (Page {page})")
         
-        # Add web references
         for result in state.get('web_search_results', []):
             url = result.get('url', '')
             if url and url not in references:
                 references.append(url)
         
-        # Add to conversation history
-        conversation_history = state.get('conversation_history', [])
-        conversation_history.append(AIMessage(content=final_response.content))
-        
         return {
             "final_response": final_response.content,
             "references": references,
-            "conversation_history": conversation_history
+            "conversation_history": state['conversation_history']
         }
     
     def additional_search_node(self, state: EnhancedAgentState) -> Dict[str, Any]:
         """Node for performing additional searches when needed"""
-        # Identify information gaps from evaluations
+
         doc_eval = state.get('document_search_evaluation', {})
         web_eval = state.get('web_search_evaluation', {})
         
         info_gaps_doc = doc_eval.get('Information Gaps', [])
         info_gaps_web = web_eval.get('Information Gaps', [])
         
-        # Combine information gaps
+
         all_gaps = info_gaps_doc + info_gaps_web
         
-        # Use Tavily for specialized search on the gaps
         additional_results = []
         for gap in all_gaps:
             if isinstance(gap, str) and gap.strip():
@@ -334,11 +336,9 @@ Remember to remain balanced, factual, and helpful while acknowledging legal comp
                 except Exception as e:
                     print(f"Error in additional search: {e}")
         
-        # Combine with existing web search results
         current_web_results = state.get('web_search_results', [])
         combined_results = current_web_results + additional_results
-        
-        # Remove duplicates by URL
+
         seen_urls = set()
         unique_results = []
         for result in combined_results:
@@ -348,8 +348,8 @@ Remember to remain balanced, factual, and helpful while acknowledging legal comp
                 unique_results.append(result)
         
         return {
-            "web_search_results": unique_results[:8],  # Limit to top 8 results
-            "need_additional_search": False  # Reset flag
+            "web_search_results": unique_results[:8],
+            "need_additional_search": False 
         }
     
     def should_perform_additional_search(self, state: EnhancedAgentState) -> str:
@@ -405,80 +405,24 @@ Remember to remain balanced, factual, and helpful while acknowledging legal comp
         
         return workflow.compile()
     
-    def visualize_workflow(self, save_path="workflow_visualization.png"):
+    def visualize_workflow(self, graph: StateGraph):
         """Visualize the LangGraph workflow with decision points and save it to a file."""
-        # Create a NetworkX graph
-        nx_graph = nx.DiGraph()
         
-        # Add nodes
-        nodes = [
-            "process_input",
-            "understand_query",
-            "document_search",
-            "evaluate_doc_search",
-            "web_search",
-            "evaluate_web_search",
-            "additional_search",
-            "generate_response"
-        ]
-        nx_graph.add_nodes_from(nodes)
-        
-        # Add edges
-        edges = [
-            ("process_input", "understand_query"),
-            ("understand_query", "document_search"),
-            ("document_search", "evaluate_doc_search"),
-            ("evaluate_doc_search", "web_search"),
-            ("evaluate_doc_search", "additional_search"),
-            ("web_search", "evaluate_web_search"),
-            ("evaluate_web_search", "generate_response"),
-            ("evaluate_web_search", "additional_search"),
-            ("additional_search", "generate_response")
-        ]
-        nx_graph.add_edges_from(edges)
-        
-        # Add edge labels for decision points
-        edge_labels = {
-            ("evaluate_doc_search", "web_search"): "sufficient",
-            ("evaluate_doc_search", "additional_search"): "insufficient",
-            ("evaluate_web_search", "generate_response"): "sufficient",
-            ("evaluate_web_search", "additional_search"): "insufficient"
-        }
-        
-        # Visualization
-        plt.figure(figsize=(12, 8))
-        pos = nx.spring_layout(nx_graph, seed=42)
-        
-        # Draw nodes
-        nx.draw_networkx_nodes(nx_graph, pos, node_color='skyblue', node_size=2500)
-        
-        # Draw edges
-        nx.draw_networkx_edges(nx_graph, pos, arrows=True, edge_color='gray')
-        
-        # Draw edge labels
-        nx.draw_networkx_edge_labels(nx_graph, pos, edge_labels=edge_labels, font_color='red')
-        
-        # Draw node labels
-        nx.draw_networkx_labels(nx_graph, pos, font_size=10, font_weight='bold')
-        
-        plt.title("Legal AI Assistant Agentic Workflow")
-        plt.tight_layout()
-        plt.axis('off')
-        
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        
-        # Save the figure
-        plt.savefig(save_path, format="png", dpi=300)
-        plt.close()
+        try:
+            img = Image(graph.get_graph().draw_mermaid_png())
+            with open("mermaid_graph.png", "wb") as f:
+                f.write(img.data)
+            print("Image saved as mermaid_graph.png")
+        except Exception as e:
+            print("Error:", e)
 
-    async def process_query(self, query: Any, input_type: str = "text"):
+    async def process_query(self, query: Any, input_type: str = "text", conversation_history=None):
         """Async method to process user query with any input type"""
         workflow = self.build_workflow()
         initial_state = {
             "input": query,
             "input_type": input_type,
-            "conversation_history": []
+            "conversation_history": conversation_history or []
         }
         
         result = await workflow.ainvoke(initial_state)

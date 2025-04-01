@@ -60,10 +60,31 @@ st.markdown("<p style='text-align: center;'>Get comprehensive legal information 
 # Initialize session state for conversation history
 if 'conversation' not in st.session_state:
     st.session_state.conversation = []
+if 'conversation_history' not in st.session_state:
+    st.session_state.conversation_history = []
 if 'waiting_for_response' not in st.session_state:
     st.session_state.waiting_for_response = False
 if 'task_id' not in st.session_state:
     st.session_state.task_id = None
+
+# Helper function to convert conversation to API format
+def prepare_conversation_history():
+    # Format conversation history for the API
+    api_format = []
+    for msg in st.session_state.conversation_history:
+        if msg["role"] == "user":
+            api_format.append({
+                "type": "human",
+                "content": msg["content"],
+                "additional_kwargs": {"timestamp": time.time()}
+            })
+        else:
+            api_format.append({
+                "type": "ai",
+                "content": msg["content"],
+                "additional_kwargs": {"timestamp": time.time()}
+            })
+    return api_format
 
 # Sidebar for input type selection and disclaimers
 with st.sidebar:
@@ -72,6 +93,12 @@ with st.sidebar:
         "Select input type:",
         ["Text Query", "Upload Document Image", "Upload PDF Document"]
     )
+    
+    # Add a button to clear the conversation
+    if st.button("Clear Conversation"):
+        st.session_state.conversation = []
+        st.session_state.conversation_history = []
+        st.experimental_rerun()
     
     st.markdown("---")
     st.markdown("<h3>Disclaimer</h3>", unsafe_allow_html=True)
@@ -100,21 +127,29 @@ if input_type == "Text Query":
     if submit_button and query and not st.session_state.waiting_for_response:
         st.session_state.waiting_for_response = True
         
-        # Add user query to conversation
+        # Add user query to conversation display
         st.session_state.conversation.append({"role": "user", "content": query})
+        # Add to conversation history for API
+        st.session_state.conversation_history.append({"role": "user", "content": query})
         
         with st.spinner("Processing your query..."):
+            # Prepare conversation history for API
+            api_conversation_history = prepare_conversation_history()
+            
             # Send query to API
             response = requests.post(
                 f"{API_BASE_URL}/query/text",
-                json={"query": query}
+                json={
+                    "query": query,
+                    "conversation_history": api_conversation_history
+                }
             )
             
             if response.status_code == 200:
                 result = response.json()
                 st.session_state.task_id = result["task_id"]
             else:
-                st.error("Error submitting query. Please try again.")
+                st.error(f"Error submitting query: {response.text}")
                 st.session_state.waiting_for_response = False
 
 elif input_type == "Upload Document Image":
@@ -129,16 +164,23 @@ elif input_type == "Upload Document Image":
         image = Image.open(uploaded_file)
         st.image(image, caption="Uploaded Document", width=400)
         
-        # Add to conversation
+        # Add to conversation display
         content = f"[Uploaded a document image]" + (f" with question: {query}" if query else "")
         st.session_state.conversation.append({"role": "user", "content": content})
+        # Add to conversation history for API
+        st.session_state.conversation_history.append({"role": "user", "content": content})
         
         with st.spinner("Processing your document..."):
-            # Prepare the files and data
-            files = {"image": uploaded_file.getvalue()}
+            # Prepare conversation history for API
+            api_conversation_history = prepare_conversation_history()
+            
+            # Prepare form data
             data = {}
             if query:
                 data["query"] = query
+            
+            # Add conversation history as JSON string
+            data["conversation_history"] = json.dumps(api_conversation_history)
                 
             # Send to API
             response = requests.post(
@@ -151,7 +193,7 @@ elif input_type == "Upload Document Image":
                 result = response.json()
                 st.session_state.task_id = result["task_id"]
             else:
-                st.error("Error processing document. Please try again.")
+                st.error(f"Error processing document: {response.text}")
                 st.session_state.waiting_for_response = False
 
 elif input_type == "Upload PDF Document":
@@ -162,23 +204,36 @@ elif input_type == "Upload PDF Document":
     if submit_button and uploaded_file and not st.session_state.waiting_for_response:
         st.session_state.waiting_for_response = True
         
-        # Add to conversation
+        # Add to conversation display
         content = f"[Uploaded a PDF document: {uploaded_file.name}]" + (f" with question: {query}" if query else "")
         st.session_state.conversation.append({"role": "user", "content": content})
+        # Add to conversation history for API
+        st.session_state.conversation_history.append({"role": "user", "content": content})
         
         with st.spinner("Processing your document..."):
+            # Prepare conversation history for API
+            api_conversation_history = prepare_conversation_history()
+            
+            # Prepare data
+            data = {}
+            if query:
+                data["query"] = query
+            
+            # Add conversation history as JSON string
+            data["conversation_history"] = json.dumps(api_conversation_history)
+            
             # Send to API
             response = requests.post(
                 f"{API_BASE_URL}/query/pdf",
                 files={"pdf": (uploaded_file.name, uploaded_file.getvalue(), "application/pdf")},
-                data={"query": query} if query else {}
+                data=data
             )
             
             if response.status_code == 200:
                 result = response.json()
                 st.session_state.task_id = result["task_id"]
             else:
-                st.error("Error processing document. Please try again.")
+                st.error(f"Error processing document: {response.text}")
                 st.session_state.waiting_for_response = False
 
 # Check for task status if waiting for response
@@ -186,43 +241,72 @@ if st.session_state.waiting_for_response and st.session_state.task_id:
     status_placeholder = st.empty()
     
     with status_placeholder.container():
-        while True:
-            response = requests.get(f"{API_BASE_URL}/query/status/{st.session_state.task_id}")
-            if response.status_code == 200:
-                result = response.json()
-                
-                if result["status"] == "completed":
-                    # Add response to conversation
-                    ai_response = result["response"]["final_response"]
-                    references = result["response"]["references"]
+        max_retries = 60  # Maximum number of retries (2 minutes at 2-second intervals)
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                response = requests.get(f"{API_BASE_URL}/query/status/{st.session_state.task_id}")
+                if response.status_code == 200:
+                    result = response.json()
                     
-                    st.session_state.conversation.append({
-                        "role": "assistant", 
-                        "content": ai_response,
-                        "references": references
-                    })
-                    
-                    # Clear the waiting state
-                    st.session_state.waiting_for_response = False
-                    st.session_state.task_id = None
-                    status_placeholder.empty()
-                    st.experimental_rerun()
-                    break
-                    
-                elif result["status"] == "error":
-                    st.error(f"Error processing request: {result['response'].get('error', 'Unknown error')}")
-                    st.session_state.waiting_for_response = False
-                    st.session_state.task_id = None
-                    break
-                    
+                    if result["status"] == "completed":
+                        # Add response to conversation display
+                        ai_response = result["response"]["final_response"]
+                        references = result["response"]["references"]
+                        
+                        st.session_state.conversation.append({
+                            "role": "assistant", 
+                            "content": ai_response,
+                            "references": references
+                        })
+                        
+                        # Add to conversation history for API
+                        st.session_state.conversation_history.append({
+                            "role": "assistant", 
+                            "content": ai_response
+                        })
+                        
+                        # Update conversation history if returned from API
+                        if "conversation_history" in result["response"]:
+                            # This is optional - depends on if you want to use the server's version
+                            # or keep managing it client-side
+                            pass
+                        
+                        # Clear the waiting state
+                        st.session_state.waiting_for_response = False
+                        st.session_state.task_id = None
+                        status_placeholder.empty()
+                        st.experimental_rerun()
+                        break
+                        
+                    elif result["status"] == "error":
+                        error_msg = result["response"].get("error", "Unknown error")
+                        st.error(f"Error processing request: {error_msg}")
+                        st.session_state.waiting_for_response = False
+                        st.session_state.task_id = None
+                        break
+                        
+                    else:
+                        st.write("Processing your request... Please wait.")
+                        time.sleep(2)  # Poll every 2 seconds
+                        retry_count += 1
                 else:
-                    st.write("Processing your request... Please wait.")
-                    time.sleep(2)  # Poll every 2 seconds
-            else:
-                st.error("Error checking status. Please try again.")
+                    st.error(f"Error checking status: {response.text}")
+                    st.session_state.waiting_for_response = False
+                    st.session_state.task_id = None
+                    break
+            except Exception as e:
+                st.error(f"Connection error: {str(e)}")
                 st.session_state.waiting_for_response = False
                 st.session_state.task_id = None
                 break
+        
+        # If maximum retries reached
+        if retry_count >= max_retries:
+            st.error("Request timed out. The server is taking too long to respond.")
+            st.session_state.waiting_for_response = False
+            st.session_state.task_id = None
 
 # Display conversation history
 st.markdown("<h2 class='sub-title'>Conversation</h2>", unsafe_allow_html=True)

@@ -4,8 +4,6 @@ from typing import List, Any
 
 import weaviate
 from weaviate.classes.init import Auth
-import weaviate.classes.config as wvc
-from weaviate.classes.config import Configure
 
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -51,62 +49,32 @@ class DocumentProcessor:
         print(f"Split into {len(chunks)} chunks")
         return chunks
     
-    def create_vector_store(self, weaviate_url: str) -> WeaviateVectorStore:
-        """Create and populate vector store with latest Weaviate API v4"""
+    def create_vector_store(self) -> WeaviateVectorStore:
+        """Create and populate vector store with documents using LangChain's WeaviateVectorStore"""
         
         client = weaviate.connect_to_weaviate_cloud(
-            cluster_url=weaviate_url,
+            cluster_url=self.weaviate_url,
             auth_credentials=Auth.api_key(self.weaviate_api_key),
         )
         
-        # Check if collection exists and create if not
-        if not client.collections.exists("LegalDocument"):
-            client.collections.create(
-                "LegalDocument",
-                vectorizer_config=[
-                    Configure.NamedVectors.text2vec_weaviate(
-                        name="content_vector",
-                        source_properties=["content"],
-                        model="Snowflake/snowflake-arctic-embed-l-v2.0",
-                    )
-                ],
-                properties=[
-                    wvc.Property(name="content", data_type=wvc.DataType.TEXT),
-                    wvc.Property(name="source", data_type=wvc.DataType.TEXT),
-                    wvc.Property(name="page", data_type=wvc.DataType.INT),
-                    wvc.Property(name="metadata", data_type=wvc.DataType.TEXT)
-                ]
-            )
-        
         chunks = self.process_documents()
-        collection = client.collections.get("LegalDocument")
         
-        # Batch import the document chunks
-        with collection.batch.dynamic() as batch:
-            for chunk in chunks:
-                batch.add_object(
-                    properties={
-                        "content": chunk.page_content,
-                        "source": chunk.metadata.get("source", ""),
-                        "page": chunk.metadata.get("page", 0),
-                        "metadata": str(chunk.metadata)
-                    }
-                )
-                if batch.number_errors > 10:
-                    print("Batch import stopped due to excessive errors.")
-                    break
+        if client.collections.exists("LegalDocuments"):
+            client.collections.delete("LegalDocuments")
         
-        failed_objects = collection.batch.failed_objects
-        if failed_objects:
-            print(f"Number of failed imports: {len(failed_objects)}")
-            print(f"First failed object: {failed_objects[0]}")
-        
-        # Create and return the LangChain vector store
-        vector_store = WeaviateVectorStore(
+        vector_store = WeaviateVectorStore.from_documents(
+            documents=chunks,
+            embedding=self.embeddings,
             client=client,
-            index_name="LegalDocument",
+            index_name="LegalDocuments", 
             text_key="content",
-            embedding=self.embeddings
+            by_text=False
         )
         
+        print(f"Successfully imported {len(chunks)} chunks into Weaviate")
         return vector_store
+    
+    def query_store(self, query: str, vector_store: WeaviateVectorStore, k: int = 5):
+        """Query the vector store for similar documents"""
+        docs = vector_store.similarity_search(query, k=k)
+        return docs

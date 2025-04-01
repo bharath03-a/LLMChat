@@ -25,14 +25,12 @@ class MultimodalInputHandler:
     def process_image(self, image_data: Union[str, bytes, Image.Image]) -> Dict[str, Any]:
         """Process image input using OCR"""
         if isinstance(image_data, str):
-            # Assuming image_data is a file path
             image = Image.open(image_data)
         elif isinstance(image_data, bytes):
             image = Image.open(BytesIO(image_data))
         else:
             image = image_data
             
-        # Extract text from image using OCR
         extracted_text = pytesseract.image_to_string(image)
         
         return {
@@ -48,7 +46,6 @@ class MultimodalInputHandler:
     def process_pdf(self, pdf_data: Union[str, bytes]) -> Dict[str, Any]:
         """Process PDF input"""
         if isinstance(pdf_data, bytes):
-            # Create a temporary file
             with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_file:
                 temp_file.write(pdf_data)
                 temp_file_path = temp_file.name
@@ -56,8 +53,7 @@ class MultimodalInputHandler:
             try:
                 loader = PyPDFLoader(temp_file_path)
                 documents = loader.load()
-                
-                # Extract text from all pages
+
                 full_text = "\n".join(doc.page_content for doc in documents)
                 
                 return {
@@ -70,14 +66,11 @@ class MultimodalInputHandler:
                     }
                 }
             finally:
-                # Remove temporary file
                 os.unlink(temp_file_path)
         else:
-            # Assuming pdf_data is a file path
             loader = PyPDFLoader(pdf_data)
             documents = loader.load()
             
-            # Extract text from all pages
             full_text = "\n".join(doc.page_content for doc in documents)
             
             return {
