@@ -117,6 +117,34 @@ def check_query_status(task_id):
         st.error(f"Error checking status: {response.status_code} - {response.text}")
         return None
 
+# Extract message type and content from LangChain messages or standard format
+def get_message_info(message):
+    # Check if it's a LangChain message format
+    if "type" in message:
+        if message.get("type") == "human":
+            return {"role": "user", "content": message.get("content", "")}
+        elif message.get("type") in ["ai", "assistant"]:
+            return {"role": "assistant", "content": message.get("content", ""), "references": message.get("references", [])}
+    # Check if it has 'role' directly (our standard format)
+    elif "role" in message:
+        return message
+    # Default fallback - try to guess based on available keys
+    elif "content" in message:
+        # If it has additional_kwargs with references, it's likely an assistant message
+        if message.get("additional_kwargs", {}).get("references"):
+            return {
+                "role": "assistant",
+                "content": message.get("content", ""),
+                "references": message.get("additional_kwargs", {}).get("references", [])
+            }
+        # Otherwise, make a best guess based on available data
+        else:
+            # Use a simple heuristic - if it doesn't look like an assistant message, treat as user
+            return {"role": "user", "content": message.get("content", "")}
+    
+    # Last resort fallback
+    return {"role": "user", "content": str(message)}
+
 # Display conversation history
 def display_conversation():
     if not st.session_state.conversation_history:
@@ -124,16 +152,25 @@ def display_conversation():
         return
 
     for message in st.session_state.conversation_history:
-        if message["role"] == "user":
-            st.markdown(f"<div class='user-message'><b>You:</b> {message['content']}</div>", unsafe_allow_html=True)
+        message_info = get_message_info(message)
+        
+        if message_info["role"] == "user":
+            st.markdown(f"<div class='user-message'><b>You:</b> {message_info['content']}</div>", unsafe_allow_html=True)
         else:
-            st.markdown(f"<div class='assistant-message'><b>Legal Assistant:</b> {message['content']}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='assistant-message'><b>Legal Assistant:</b> {message_info['content']}</div>", unsafe_allow_html=True)
             
             # Display references if available
-            if "references" in message and message["references"]:
+            if "references" in message_info and message_info["references"]:
                 with st.expander("References"):
-                    for i, ref in enumerate(message["references"]):
+                    for i, ref in enumerate(message_info["references"]):
                         st.markdown(f"<div class='reference-box'><b>Reference {i+1}:</b> {ref}</div>", unsafe_allow_html=True)
+
+# Convert API response conversation history to our format
+def normalize_conversation_history(api_history):
+    normalized_history = []
+    for message in api_history:
+        normalized_history.append(get_message_info(message))
+    return normalized_history
 
 # Main app
 def main():
@@ -269,7 +306,7 @@ def main():
                 if "conversation_history" in response_data:
                     api_history = response_data.get("conversation_history", [])
                     if api_history:
-                        st.session_state.conversation_history = api_history
+                        st.session_state.conversation_history = normalize_conversation_history(api_history)
                         
             elif task_info.get("status") == "error":
                 error_msg = task_info.get("response", {}).get("error", "Unknown error occurred")
