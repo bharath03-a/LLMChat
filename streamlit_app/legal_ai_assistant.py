@@ -175,10 +175,17 @@ class LegalAIAssistant:
     
     def process_input_node(self, state: EnhancedAgentState) -> Dict[str, Any]:
         """Process the input based on its type"""
-        processed_input = self.input_handler.process_input(
-            state['input'], 
-            state['input_type']
-        )
+        if state.get('text_query') and state['input_type'] in ["image", "pdf"]:
+            processed_input = self.input_handler.process_input(
+                state['input'], 
+                state['input_type'],
+                text_query=state.get('text_query')
+            )
+        else:
+            processed_input = self.input_handler.process_input(
+                state['input'], 
+                state['input_type']
+            )
 
         if 'conversation_history' not in state:
             state['conversation_history'] = []
@@ -416,12 +423,13 @@ class LegalAIAssistant:
         except Exception as e:
             print("Error:", e)
 
-    async def process_query(self, query: Any, input_type: str = "text", conversation_history=None):
+    async def process_query(self, query: Any, input_type: str = "text", text_query: str = "", conversation_history=None):
         """Async method to process user query with any input type"""
         workflow = self.build_workflow()
         initial_state = {
             "input": query,
             "input_type": input_type,
+            "text_query": text_query, 
             "conversation_history": conversation_history or []
         }
         
