@@ -16,7 +16,7 @@ import time
 load_dotenv()
 
 # Import our Legal AI Assistant
-from legal_ai_assistant import LegalAIAssistant
+from agent.legal_ai_assistant import LegalAIAssistant
 
 # Global variables
 legal_assistant = None

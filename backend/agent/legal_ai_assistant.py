@@ -25,9 +25,9 @@ import matplotlib.pyplot as plt
 load_dotenv()
 
 # Import our custom modules
-from document_processing import DocumentProcessor
-from multimodal_handler import MultimodalInputHandler
-from enhanced_agent_state import EnhancedAgentState, determine_search_sufficiency
+from processing.document_processing import DocumentProcessor
+from processing.multimodal_handler import MultimodalInputHandler
+from agent.enhanced_agent_state import EnhancedAgentState, determine_search_sufficiency
 
 class LegalAIAssistant:
     def __init__(self):
@@ -39,7 +39,7 @@ class LegalAIAssistant:
         
         self.tavily_client = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
     
-        self.document_processor = DocumentProcessor(documents_dir="../streamlit_app/notes/")
+        self.document_processor = DocumentProcessor(documents_dir="")
         self.vector_store = self.document_processor.create_vector_store()
 
         self.input_handler = MultimodalInputHandler()

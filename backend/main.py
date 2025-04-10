@@ -2,7 +2,7 @@ import os
 import asyncio
 from dotenv import load_dotenv
 import argparse
-from legal_ai_assistant import LegalAIAssistant
+from agent.legal_ai_assistant import LegalAIAssistant
 import uvicorn
 
 async def demo_query(query_text):
