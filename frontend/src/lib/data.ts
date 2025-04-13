@@ -1,24 +1,22 @@
-import React from "react";
-
 export const links = [
   {
     name: "Home",
-    hash: "#home",
+    hash: "/",
   },
   {
     name: "Dashboard",
-    hash: "#dashboard",
+    hash: "/dashboard",
   },
   {
     name: "Chat",
-    hash: "#chat",
+    hash: "/chat",
   },
   {
     name: "Document",
-    hash: "#document",
+    hash: "/document",
   },
   {
     name: "Image",
-    hash: "#image",
+    hash: "/image",
   },
-] as const;
+] as const
